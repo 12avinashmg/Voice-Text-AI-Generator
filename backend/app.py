@@ -5,6 +5,8 @@ import pyttsx3
 import requests
 import os
 from datetime import datetime
+import threading
+import queue
 
 app = Flask(__name__)
 CORS(app)
@@ -18,49 +20,113 @@ if not os.path.exists(SAVE_DIR):
 
 stop_listening = False
 stop_speaking = False
-current_engine = None
 
 def is_question(text):
-    """
-    Detect if text is a question or just a statement/name
-    Returns: True if question, False if just text
-    """
+    """Detect if text is a question or just a statement/name"""
     text = text.strip().lower()
     
-    # Question indicators
     question_words = ['what', 'why', 'how', 'when', 'where', 'who', 'which', 'whom', 'whose', 'can', 'could', 'would', 'will', 'do', 'does', 'did', 'is', 'are', 'have', 'has']
     question_marks = text.endswith('?')
     
-    # Check for question words at start
     for word in question_words:
         if text.startswith(word + ' '):
             return True
     
-    # Check for question mark
     if question_marks:
         return True
     
-    # If it's just a name or single word, it's NOT a question
     if len(text.split()) <= 2:
         return False
     
-    # Check for question patterns
     if any(word in text.split() for word in ['is', 'are', 'can', 'could', 'would', 'will', 'do', 'does', 'did']):
         return True
     
     return False
 
+def speak_text_thread_safe(text_to_speak, voice_type='user'):
+    """
+    FIXED: Speak text safely without "run loop already started" error
+    Creates fresh engine, uses it, then destroys it
+    """
+    global stop_speaking
+    
+    if stop_speaking or not text_to_speak:
+        print(f"⏭️ Skipping speech")
+        return True
+    
+    try:
+        print(f"🔊 Starting speech in thread ({voice_type})...")
+        
+        # Create NEW engine instance (don't reuse)
+        engine = pyttsx3.init('sapi5')
+        
+        # Set properties
+        engine.setProperty('rate', 130)
+        engine.setProperty('volume', 1.0)
+        
+        # Get and set voice
+        voices = engine.getProperty('voices')
+        print(f"📢 Available voices: {len(voices)}")
+        
+        if len(voices) > 1:
+            engine.setProperty('voice', voices[1].id)
+            print(f"✅ Using voice: {voices[1].name}")
+        elif len(voices) > 0:
+            engine.setProperty('voice', voices[0].id)
+            print(f"✅ Using voice: {voices[0].name}")
+        
+        # Speak
+        if not stop_speaking:
+            print(f"🗣️ Speaking ({voice_type}): {text_to_speak[:50]}...")
+            engine.say(text_to_speak)
+            engine.runAndWait()
+            print(f"✅ Speech complete!")
+        
+        # IMPORTANT: Delete engine properly
+        del engine
+        
+        return True
+    
+    except Exception as e:
+        print(f"❌ SPEECH ERROR: {type(e).__name__}: {str(e)}")
+        return False
+
 @app.route('/api/health', methods=['GET'])
 def health():
     return jsonify({'status': 'Server is running! ✅'})
 
+@app.route('/api/test-voice', methods=['GET'])
+def test_voice():
+    """Test if voice is working"""
+    try:
+        print("🔊 Testing voice...")
+        
+        # Create fresh engine
+        engine = pyttsx3.init('sapi5')
+        engine.setProperty('rate', 130)
+        engine.setProperty('volume', 1.0)
+        
+        voices = engine.getProperty('voices')
+        print(f"✅ Found {len(voices)} voices")
+        
+        for i, v in enumerate(voices):
+            print(f"  {i}: {v.name}")
+        
+        # Test speak
+        engine.say("Hello, this is a test")
+        engine.runAndWait()
+        
+        # Delete engine
+        del engine
+        
+        return jsonify({'success': True, 'message': 'Voice works!', 'voices_count': len(voices)})
+    
+    except Exception as e:
+        print(f"❌ Voice test failed: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/speech-to-text', methods=['POST'])
 def speech_to_text():
-    """
-    SMART VOICE TO TEXT:
-    - If question → Also generate AI answer
-    - If just text → Only convert to text
-    """
     global stop_listening
     stop_listening = False
     
@@ -82,7 +148,6 @@ def speech_to_text():
         text = recognizer.recognize_google(audio)
         print(f"✅ You said: {text}")
         
-        # CHECK: Is it a question?
         is_q = is_question(text)
         print(f"{'❓ Question' if is_q else '📝 Statement'}: {text}")
         
@@ -106,7 +171,6 @@ def stop_listening_route():
 
 @app.route('/api/get-ai-understanding', methods=['POST'])
 def get_ai_understanding():
-    """Generate AI answer only for questions"""
     try:
         data = request.json
         text = data.get('text', '')
@@ -141,47 +205,10 @@ def get_ai_understanding():
         print(f"❌ Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-def speak_text(text_to_speak, voice_type='user'):
-    """Speak text with proper error handling"""
-    global stop_speaking, current_engine
-    
-    if stop_speaking or not text_to_speak:
-        return
-    
-    try:
-        engine = pyttsx3.init('sapi5')
-        current_engine = engine
-        
-        engine.setProperty('rate', 140)
-        engine.setProperty('volume', 1.0)
-        
-        voices = engine.getProperty('voices')
-        
-        if voice_type == 'user' and len(voices) > 1:
-            engine.setProperty('voice', voices[1].id)
-        elif voice_type == 'ai' and len(voices) > 0:
-            engine.setProperty('voice', voices[0].id)
-        
-        if not stop_speaking:
-            print(f"🔊 Speaking ({voice_type}): {text_to_speak[:40]}...")
-            engine.say(text_to_speak)
-            engine.runAndWait()
-        
-        print(f"✅ Speech finished ({voice_type})")
-        current_engine = None
-        return True
-    
-    except Exception as e:
-        print(f"❌ Speech error: {e}")
-        current_engine = None
-        return False
-
 @app.route('/api/text-to-voice-and-generate', methods=['POST'])
 def text_to_voice_and_generate():
     """
-    SMART TEXT TO VOICE MODE:
-    - If question → Speak + Generate Answer + Speak Answer
-    - If not question → Only speak text
+    FIXED: Smart mode with proper engine management
     """
     global stop_speaking
     stop_speaking = False
@@ -193,30 +220,32 @@ def text_to_voice_and_generate():
         if not user_text:
             return jsonify({'error': 'No text'}), 400
         
+        print(f"\n{'='*70}")
         print(f"📝 User input: {user_text}")
+        print(f"{'='*70}\n")
         
         # STEP 1: Speak user text
-        print(f"🎙️ Speaking your input...")
-        if not speak_text(user_text, 'user'):
-            return jsonify({'error': 'Voice error'}), 500
+        print(f"🎙️ STEP 1: Speaking your input...")
+        result = speak_text_thread_safe(user_text, 'user')
+        print(f"Result: {result}\n")
         
         if stop_speaking:
             return jsonify({'success': False, 'message': 'Stopped'})
         
-        # STEP 2: Check if it's a question
+        # STEP 2: Check if question
         if not is_question(user_text):
-            print(f"✅ Not a question - just speaking the text")
+            print(f"✅ Not a question - just spoke the text\n")
             return jsonify({
                 'success': True,
                 'user_input': user_text,
                 'ai_response': '',
                 'is_question': False,
-                'message': 'Text spoken (not a question)'
+                'message': 'Text spoken'
             })
         
-        print(f"❓ Question detected - generating answer...")
+        # STEP 3: Generate AI response
+        print(f"❓ STEP 2: Generating AI response...")
         
-        # STEP 3: Generate AI response only for QUESTIONS
         try:
             ollama_response = requests.post(
                 OLLAMA_API,
@@ -234,24 +263,25 @@ def text_to_voice_and_generate():
             )
             
             ai_response = ollama_response.json()['response'].strip()[:200]
-            print(f"✅ AI generated: {ai_response}")
+            print(f"✅ AI generated: {ai_response}\n")
         
         except requests.exceptions.Timeout:
             return jsonify({'error': 'AI response took too long'}), 500
         except Exception as e:
-            print(f"❌ AI error: {str(e)}")
+            print(f"❌ AI error: {str(e)}\n")
             return jsonify({'error': str(e)}), 500
         
         if stop_speaking:
             return jsonify({'success': False, 'message': 'Stopped'})
         
         # STEP 4: Speak AI response
-        print(f"🔊 Speaking AI response...")
+        print(f"🔊 STEP 3: Speaking AI response...")
+        result = speak_text_thread_safe(ai_response, 'ai')
+        print(f"Result: {result}\n")
         
-        if not speak_text(ai_response, 'ai'):
-            print("Warning: AI voice failed")
-        
+        print(f"{'='*70}")
         print(f"✅ Complete!")
+        print(f"{'='*70}\n")
         
         return jsonify({
             'success': True,
@@ -262,12 +292,13 @@ def text_to_voice_and_generate():
         })
     
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
+        print(f"❌ Error: {str(e)}\n")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/text-to-speech', methods=['POST'])
 def text_to_speech():
-    """Fallback"""
     global stop_speaking
     stop_speaking = False
     
@@ -280,10 +311,9 @@ def text_to_speech():
         
         print(f"📝 Input: {user_text}")
         
-        # Check if question
         if not is_question(user_text):
             print("Not a question - only speaking")
-            speak_text(user_text, 'user')
+            speak_text_thread_safe(user_text, 'user')
             return jsonify({
                 'success': True,
                 'user_input': user_text,
@@ -291,7 +321,6 @@ def text_to_speech():
                 'is_question': False
             })
         
-        # Generate answer for questions
         ollama_response = requests.post(
             OLLAMA_API,
             json={
@@ -312,7 +341,7 @@ def text_to_speech():
         if stop_speaking:
             return jsonify({'success': False})
         
-        speak_text(ai_response, 'ai')
+        speak_text_thread_safe(ai_response, 'ai')
         
         return jsonify({
             'success': True,
@@ -327,15 +356,8 @@ def text_to_speech():
 
 @app.route('/api/stop-speech', methods=['POST'])
 def stop_speech():
-    global stop_speaking, current_engine
+    global stop_speaking
     stop_speaking = True
-    
-    if current_engine:
-        try:
-            current_engine.stop()
-        except:
-            pass
-    
     print("⏹️ Stopped")
     return jsonify({'success': True})
 
@@ -430,11 +452,11 @@ TEXT/STATEMENT: {item['userInput']}
 
 if __name__ == '__main__':
     print("=" * 70)
-    print("⚡ VOICE & TEXT AI GENERATOR (SMART MODE)")
+    print("⚡ VOICE & TEXT AI GENERATOR (FIXED)")
     print("=" * 70)
     print("✅ Backend: http://localhost:5000")
-    print("🎙️ Voice Mode: Smart Detection (Question vs Text)")
-    print("📝 Text Mode: Smart Detection (Question vs Text)")
-    print("❓ Smart Detection: ENABLED (Both Voice & Text)")
+    print("🇮🇳 Language: Indian English")
+    print("🔧 Engine: Fresh instance per speech (no reuse)")
     print("=" * 70)
+    
     app.run(debug=True, port=5000, threaded=True)
