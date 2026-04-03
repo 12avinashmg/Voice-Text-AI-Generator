@@ -1,14 +1,10 @@
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 import speech_recognition as sr
 import pyttsx3
 import requests
 import os
 from datetime import datetime
-import threading
-import json
-import signal
-import subprocess
 
 app = Flask(__name__)
 CORS(app)
@@ -20,11 +16,39 @@ SAVE_DIR = os.path.join(os.path.dirname(__file__), 'saved_responses')
 if not os.path.exists(SAVE_DIR):
     os.makedirs(SAVE_DIR)
 
-# Global control variables
 stop_listening = False
 stop_speaking = False
 current_engine = None
-current_recognizer = None
+
+def is_question(text):
+    """
+    Detect if text is a question or just a statement/name
+    Returns: True if question, False if just text
+    """
+    text = text.strip().lower()
+    
+    # Question indicators
+    question_words = ['what', 'why', 'how', 'when', 'where', 'who', 'which', 'whom', 'whose', 'can', 'could', 'would', 'will', 'do', 'does', 'did', 'is', 'are', 'have', 'has']
+    question_marks = text.endswith('?')
+    
+    # Check for question words at start
+    for word in question_words:
+        if text.startswith(word + ' '):
+            return True
+    
+    # Check for question mark
+    if question_marks:
+        return True
+    
+    # If it's just a name or single word, it's NOT a question
+    if len(text.split()) <= 2:
+        return False
+    
+    # Check for question patterns
+    if any(word in text.split() for word in ['is', 'are', 'can', 'could', 'would', 'will', 'do', 'does', 'did']):
+        return True
+    
+    return False
 
 @app.route('/api/health', methods=['GET'])
 def health():
@@ -32,60 +56,64 @@ def health():
 
 @app.route('/api/speech-to-text', methods=['POST'])
 def speech_to_text():
-    global stop_listening, current_recognizer
+    """
+    SMART VOICE TO TEXT:
+    - If question → Also generate AI answer
+    - If just text → Only convert to text
+    """
+    global stop_listening
     stop_listening = False
     
     try:
         recognizer = sr.Recognizer()
-        current_recognizer = recognizer
-        
-        # FASTER recognition settings
         recognizer.energy_threshold = 4000
         recognizer.dynamic_energy_threshold = False
         recognizer.phrase_threshold = 0.3
         recognizer.non_speaking_duration = 0.3
         
         with sr.Microphone() as source:
-            print("🎤 Listening (click stop to stop)...")
+            print("🎤 Listening...")
             recognizer.adjust_for_ambient_noise(source, duration=0.3)
-            
-            # Listen with timeout - can be interrupted
             audio = recognizer.listen(source, timeout=10, phrase_time_limit=5)
         
         if stop_listening:
-            print("⏹️ Listening stopped by user")
-            return jsonify({'success': False, 'message': 'Stopped by user'})
+            return jsonify({'success': False, 'message': 'Stopped'})
         
-        print("⏳ Converting to text...")
         text = recognizer.recognize_google(audio)
         print(f"✅ You said: {text}")
         
-        return jsonify({'success': True, 'original_text': text})
+        # CHECK: Is it a question?
+        is_q = is_question(text)
+        print(f"{'❓ Question' if is_q else '📝 Statement'}: {text}")
+        
+        return jsonify({
+            'success': True,
+            'original_text': text,
+            'is_question': is_q
+        })
     
     except sr.UnknownValueError:
         return jsonify({'error': 'Could not understand'}), 400
     except Exception as e:
         print(f"❌ Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
-    finally:
-        current_recognizer = None
 
 @app.route('/api/stop-listening', methods=['POST'])
 def stop_listening_route():
-    """IMMEDIATELY stop listening"""
     global stop_listening
     stop_listening = True
-    print("⏹️ Stop listening requested")
     return jsonify({'success': True})
 
 @app.route('/api/get-ai-understanding', methods=['POST'])
 def get_ai_understanding():
+    """Generate AI answer only for questions"""
     try:
         data = request.json
         text = data.get('text', '')
+        is_question_input = data.get('is_question', True)
         
-        if not text:
-            return jsonify({'error': 'No text'}), 400
+        if not text or not is_question_input:
+            return jsonify({'error': 'Not a question'}), 400
         
         print(f"🤖 AI processing: {text[:40]}...")
         
@@ -93,19 +121,19 @@ def get_ai_understanding():
             OLLAMA_API,
             json={
                 "model": FAST_MODEL,
-                "prompt": f"Answer briefly: {text}",
+                "prompt": f"Answer briefly in 1-2 sentences: {text}",
                 "stream": False,
                 "options": {
-                    "temperature": 0.5,
-                    "top_p": 0.8,
-                    "num_predict": 150
+                    "temperature": 0.3,
+                    "top_p": 0.5,
+                    "num_predict": 50
                 }
             },
-            timeout=20
+            timeout=15
         )
         
-        ai_response = response.json()['response'].strip()[:300]
-        print(f"✅ Response: {ai_response[:40]}...")
+        ai_response = response.json()['response'].strip()[:200]
+        print(f"✅ Response: {ai_response}")
         
         return jsonify({'success': True, 'response': ai_response})
     
@@ -113,204 +141,203 @@ def get_ai_understanding():
         print(f"❌ Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/text-to-speech-stream', methods=['POST'])
-def text_to_speech_stream():
-    """Streaming with IMMEDIATE stop support"""
+def speak_text(text_to_speak, voice_type='user'):
+    """Speak text with proper error handling"""
     global stop_speaking, current_engine
-    stop_speaking = False
+    
+    if stop_speaking or not text_to_speak:
+        return
     
     try:
-        data = request.json
-        user_text = data.get('text', '')
+        engine = pyttsx3.init('sapi5')
+        current_engine = engine
         
-        if not user_text:
-            return jsonify({'error': 'No text'}), 400
+        engine.setProperty('rate', 140)
+        engine.setProperty('volume', 1.0)
         
-        print(f"📝 Input: {user_text[:40]}...")
+        voices = engine.getProperty('voices')
         
-        def speak_async(text_to_speak):
-            global stop_speaking, current_engine
-            
-            if stop_speaking or not text_to_speak:
-                return
-            
-            try:
-                # Use Windows SAPI for better voice quality and control
-                engine = pyttsx3.init('sapi5')  # Windows voices
-                current_engine = engine
-                
-                # BEST SETTINGS FOR CLEAR VOICE
-                engine.setProperty('rate', 140)      # Perfect speed (140-160 WPM)
-                engine.setProperty('volume', 1.0)    # Maximum volume
-                
-                # Use best available voice
-                voices = engine.getProperty('voices')
-                if len(voices) > 1:
-                    # Try to use a female voice (usually clearer)
-                    engine.setProperty('voice', voices[1].id)
-                
-                print(f"🔊 Speaking with clear voice...")
-                engine.say(text_to_speak)
-                engine.runAndWait()
-                
-                current_engine = None
-            except Exception as e:
-                print(f"Voice error: {e}")
-                current_engine = None
+        if voice_type == 'user' and len(voices) > 1:
+            engine.setProperty('voice', voices[1].id)
+        elif voice_type == 'ai' and len(voices) > 0:
+            engine.setProperty('voice', voices[0].id)
         
-        # Stream from Ollama - FASTER
-        response = requests.post(
-            OLLAMA_API,
-            json={
-                "model": FAST_MODEL,
-                "prompt": user_text,
-                "stream": True,
-                "options": {
-                    "temperature": 0.5,
-                    "top_p": 0.8,
-                    "num_predict": 200
-                }
-            },
-            timeout=25,
-            stream=True
-        )
+        if not stop_speaking:
+            print(f"🔊 Speaking ({voice_type}): {text_to_speak[:40]}...")
+            engine.say(text_to_speak)
+            engine.runAndWait()
         
-        full_response = ""
-        speak_started = False
-        min_chars = 40  # Start speaking sooner
-        
-        def generate():
-            nonlocal full_response, speak_started
-            
-            for line in response.iter_lines():
-                if stop_speaking:
-                    print("⏹️ Generation stopped")
-                    break
-                
-                if line:
-                    try:
-                        chunk = json.loads(line)
-                        if 'response' in chunk:
-                            text_chunk = chunk['response']
-                            full_response += text_chunk
-                            
-                            # Send to frontend immediately
-                            yield f"data: {json.dumps({'text': text_chunk, 'full': full_response})}\n\n"
-                            
-                            # Start speaking early
-                            if not speak_started and len(full_response) > min_chars and not stop_speaking:
-                                speak_started = True
-                                threading.Thread(target=speak_async, args=(full_response,), daemon=True).start()
-                    
-                    except:
-                        pass
-            
-            print(f"✅ Complete: {full_response[:40]}...")
-            if not stop_speaking:
-                yield f"data: {json.dumps({'complete': True, 'full': full_response})}\n\n"
-        
-        return Response(generate(), mimetype='text/event-stream')
+        print(f"✅ Speech finished ({voice_type})")
+        current_engine = None
+        return True
     
     except Exception as e:
-        print(f"❌ Stream Error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        print(f"❌ Speech error: {e}")
+        current_engine = None
+        return False
 
-@app.route('/api/text-to-speech', methods=['POST'])
-def text_to_speech():
-    """Fallback non-streaming with IMMEDIATE stop"""
-    global stop_speaking, current_engine
+@app.route('/api/text-to-voice-and-generate', methods=['POST'])
+def text_to_voice_and_generate():
+    """
+    SMART TEXT TO VOICE MODE:
+    - If question → Speak + Generate Answer + Speak Answer
+    - If not question → Only speak text
+    """
+    global stop_speaking
     stop_speaking = False
     
     try:
         data = request.json
-        user_text = data.get('text', '')
+        user_text = data.get('text', '').strip()
         
         if not user_text:
             return jsonify({'error': 'No text'}), 400
         
-        print(f"📝 Input: {user_text[:40]}...")
+        print(f"📝 User input: {user_text}")
         
-        ollama_response = requests.post(
-            OLLAMA_API,
-            json={
-                "model": FAST_MODEL,
-                "prompt": user_text,
-                "stream": False,
-                "options": {
-                    "temperature": 0.5,
-                    "top_p": 0.8,
-                    "num_predict": 200
-                }
-            },
-            timeout=20
-        )
-        
-        ai_generated_text = ollama_response.json()['response'].strip()[:500]
+        # STEP 1: Speak user text
+        print(f"🎙️ Speaking your input...")
+        if not speak_text(user_text, 'user'):
+            return jsonify({'error': 'Voice error'}), 500
         
         if stop_speaking:
             return jsonify({'success': False, 'message': 'Stopped'})
         
-        print(f"✅ Response: {ai_generated_text[:40]}...")
+        # STEP 2: Check if it's a question
+        if not is_question(user_text):
+            print(f"✅ Not a question - just speaking the text")
+            return jsonify({
+                'success': True,
+                'user_input': user_text,
+                'ai_response': '',
+                'is_question': False,
+                'message': 'Text spoken (not a question)'
+            })
         
-        # BEST VOICE QUALITY
+        print(f"❓ Question detected - generating answer...")
+        
+        # STEP 3: Generate AI response only for QUESTIONS
         try:
-            engine = pyttsx3.init('sapi5')  # Windows SAPI5 for best voices
-            current_engine = engine
+            ollama_response = requests.post(
+                OLLAMA_API,
+                json={
+                    "model": FAST_MODEL,
+                    "prompt": f"Answer briefly in 1-2 sentences: {user_text}",
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.3,
+                        "top_p": 0.5,
+                        "num_predict": 50
+                    }
+                },
+                timeout=12
+            )
             
-            # OPTIMAL SETTINGS FOR CLARITY
-            engine.setProperty('rate', 140)      # Clear speed
-            engine.setProperty('volume', 1.0)    # Max volume
-            
-            voices = engine.getProperty('voices')
-            if len(voices) > 1:
-                engine.setProperty('voice', voices[1].id)  # Better voice
-            
-            print(f"🔊 Speaking clearly...")
-            
-            if not stop_speaking:
-                engine.say(ai_generated_text)
-                engine.runAndWait()
-            
-            current_engine = None
-        except:
-            # Fallback to default
-            engine = pyttsx3.init()
-            current_engine = engine
-            engine.setProperty('rate', 140)
-            engine.setProperty('volume', 1.0)
-            
-            if not stop_speaking:
-                engine.say(ai_generated_text)
-                engine.runAndWait()
-            
-            current_engine = None
+            ai_response = ollama_response.json()['response'].strip()[:200]
+            print(f"✅ AI generated: {ai_response}")
+        
+        except requests.exceptions.Timeout:
+            return jsonify({'error': 'AI response took too long'}), 500
+        except Exception as e:
+            print(f"❌ AI error: {str(e)}")
+            return jsonify({'error': str(e)}), 500
+        
+        if stop_speaking:
+            return jsonify({'success': False, 'message': 'Stopped'})
+        
+        # STEP 4: Speak AI response
+        print(f"🔊 Speaking AI response...")
+        
+        if not speak_text(ai_response, 'ai'):
+            print("Warning: AI voice failed")
+        
+        print(f"✅ Complete!")
         
         return jsonify({
-            'success': True, 
+            'success': True,
             'user_input': user_text,
-            'ai_response': ai_generated_text
+            'ai_response': ai_response,
+            'is_question': True,
+            'message': 'Question answered'
         })
     
     except Exception as e:
         print(f"❌ Error: {str(e)}")
-        current_engine = None
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/text-to-speech', methods=['POST'])
+def text_to_speech():
+    """Fallback"""
+    global stop_speaking
+    stop_speaking = False
+    
+    try:
+        data = request.json
+        user_text = data.get('text', '').strip()
+        
+        if not user_text:
+            return jsonify({'error': 'No text'}), 400
+        
+        print(f"📝 Input: {user_text}")
+        
+        # Check if question
+        if not is_question(user_text):
+            print("Not a question - only speaking")
+            speak_text(user_text, 'user')
+            return jsonify({
+                'success': True,
+                'user_input': user_text,
+                'ai_response': '',
+                'is_question': False
+            })
+        
+        # Generate answer for questions
+        ollama_response = requests.post(
+            OLLAMA_API,
+            json={
+                "model": FAST_MODEL,
+                "prompt": f"Answer briefly in 1-2 sentences: {user_text}",
+                "stream": False,
+                "options": {
+                    "temperature": 0.3,
+                    "top_p": 0.5,
+                    "num_predict": 50
+                }
+            },
+            timeout=12
+        )
+        
+        ai_response = ollama_response.json()['response'].strip()[:200]
+        
+        if stop_speaking:
+            return jsonify({'success': False})
+        
+        speak_text(ai_response, 'ai')
+        
+        return jsonify({
+            'success': True,
+            'user_input': user_text,
+            'ai_response': ai_response,
+            'is_question': True
+        })
+    
+    except Exception as e:
+        print(f"❌ Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/stop-speech', methods=['POST'])
 def stop_speech():
-    """IMMEDIATELY stop speech generation and speaking"""
     global stop_speaking, current_engine
     stop_speaking = True
     
-    # Force kill the engine
     if current_engine:
         try:
             current_engine.stop()
         except:
             pass
     
-    print("⏹️ Speech stopped immediately")
-    return jsonify({'success': True, 'message': 'Stopped immediately'})
+    print("⏹️ Stopped")
+    return jsonify({'success': True})
 
 @app.route('/api/save-response', methods=['POST'])
 def save_response():
@@ -331,13 +358,13 @@ def save_response():
 
 Timestamp: {timestamp}
 
-INPUT:
+YOUR INPUT:
 {'-'*70}
 {user_input}
 
-OUTPUT (AI Generated):
+AI RESPONSE:
 {'-'*70}
-{output}
+{output if output else 'No AI response (not a question)'}
 
 {'='*70}
 Generated by: Voice & Text AI Generator
@@ -346,8 +373,6 @@ Generated by: Voice & Text AI Generator
         
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(content.strip())
-        
-        print(f"✅ Saved: {filename}")
         
         return jsonify({'success': True, 'message': 'Saved', 'filename': filename})
     
@@ -373,14 +398,26 @@ Total Conversations: {len(history)}
 """
         
         for i, item in enumerate(history, 1):
-            content += f"""
+            if item.get('aiResponse'):
+                content += f"""
 Conversation {i}:
 Type: {item['type'].upper()}
 Date: {item['date']} at {item['timestamp']}
 
-Input: {item['userInput']}
+QUESTION: {item['userInput']}
 
-AI Response: {item['aiResponse']}
+ANSWER: {item['aiResponse']}
+
+{'-'*80}
+
+"""
+            else:
+                content += f"""
+Conversation {i}:
+Type: {item['type'].upper()}
+Date: {item['date']} at {item['timestamp']}
+
+TEXT/STATEMENT: {item['userInput']}
 
 {'-'*80}
 
@@ -393,12 +430,11 @@ AI Response: {item['aiResponse']}
 
 if __name__ == '__main__':
     print("=" * 70)
-    print("⚡ VOICE & TEXT AI GENERATOR (OPTIMIZED)")
+    print("⚡ VOICE & TEXT AI GENERATOR (SMART MODE)")
     print("=" * 70)
     print("✅ Backend: http://localhost:5000")
-    print("🚀 Model: Phi (Fast + Good Quality)")
-    print("🔊 Voice: Windows SAPI5 (Crystal Clear)")
-    print("⏱️  Response time: 3-6 seconds")
-    print("⏹️  Immediate Stop: WORKING")
+    print("🎙️ Voice Mode: Smart Detection (Question vs Text)")
+    print("📝 Text Mode: Smart Detection (Question vs Text)")
+    print("❓ Smart Detection: ENABLED (Both Voice & Text)")
     print("=" * 70)
     app.run(debug=True, port=5000, threaded=True)

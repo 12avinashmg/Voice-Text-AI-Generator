@@ -76,8 +76,8 @@ function updateHistoryDisplay() {
     historyContainer.innerHTML = conversationHistory.map((item) => `
         <div class="history-item">
             <div class="history-item-type">${item.type === 'voice' ? '🎤' : '🔊'} ${item.timestamp}</div>
-            <div class="history-item-text"><strong>Input:</strong> ${item.userInput.substring(0, 35)}...</div>
-            <div class="history-item-text"><strong>Response:</strong> ${item.aiResponse.substring(0, 35)}...</div>
+            <div class="history-item-text"><strong>Input:</strong> ${item.userInput.substring(0, 30)}...</div>
+            ${item.aiResponse ? `<div class="history-item-text"><strong>Answer:</strong> ${item.aiResponse.substring(0, 30)}...</div>` : ''}
         </div>
     `).join('');
 }
@@ -117,7 +117,7 @@ exportBtn.addEventListener('click', async () => {
     }
 });
 
-// ===== VOICE TO TEXT (IMMEDIATE STOP) =====
+// ===== VOICE TO TEXT (SMART DETECTION) =====
 recordBtn.addEventListener('click', async () => {
     if (isProcessing) return;
     isProcessing = true;
@@ -137,31 +137,43 @@ recordBtn.addEventListener('click', async () => {
         const data = await response.json();
         
         if (data.success) {
-            voiceOutput.innerHTML = `<strong>Speech:</strong><br>${data.original_text}`;
-            aiVoiceOutput.innerHTML = `<p style="color:#999;">✨ Understanding...</p>`;
+            voiceOutput.innerHTML = `<strong>You said:</strong><br><span style="color:#667eea;">${data.original_text}</span>`;
             
-            const aiResponse = await fetch(`${API_URL}/get-ai-understanding`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: data.original_text })
-            });
-            
-            const aiData = await aiResponse.json();
-            if (aiData.success) {
-                aiVoiceOutput.innerHTML = `<strong>AI:</strong><br>${aiData.response}`;
-                currentVoiceData = { input: data.original_text, output: aiData.response };
-                addToHistory('voice', data.original_text, aiData.response);
-                copyVoiceBtn.disabled = false;
-                saveVoiceBtn.disabled = false;
-                showNotification('✅ Done!');
+            // CHECK: Is it a question?
+            if (data.is_question) {
+                // It's a question - get AI response
+                aiVoiceOutput.innerHTML = `<p style="color:#999;">✨ Generating answer...</p>`;
+                
+                const aiResponse = await fetch(`${API_URL}/get-ai-understanding`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: data.original_text, is_question: true })
+                });
+                
+                const aiData = await aiResponse.json();
+                if (aiData.success) {
+                    aiVoiceOutput.innerHTML = `<strong>🤖 AI Answer:</strong><br><span style="color:#11998e;">${aiData.response}</span>`;
+                    currentVoiceData = { input: data.original_text, output: aiData.response };
+                    addToHistory('voice', data.original_text, aiData.response);
+                    showNotification('✅ Question answered!');
+                }
+            } else {
+                // It's just text - no AI response needed
+                aiVoiceOutput.innerHTML = `<p style="color:#11998e;">✅ Text converted (not a question)</p>`;
+                currentVoiceData = { input: data.original_text, output: '' };
+                addToHistory('voice', data.original_text, '');
+                showNotification('✅ Text converted!');
             }
+            
+            copyVoiceBtn.disabled = false;
+            saveVoiceBtn.disabled = false;
         } else {
             voiceOutput.innerHTML = `<p style="color:#eb3349;">❌ ${data.error || 'Error'}</p>`;
         }
     } catch (error) {
         if (error.name === 'AbortError') {
-            voiceOutput.innerHTML = `<p style="color:#ffa502;">⏹️ Stopped by user</p>`;
-            showNotification('⏹️ Listening stopped');
+            voiceOutput.innerHTML = `<p style="color:#ffa502;">⏹️ Stopped</p>`;
+            showNotification('⏹️ Stopped');
         } else {
             voiceOutput.innerHTML = `<p style="color:#eb3349;">❌ ${error.message}</p>`;
         }
@@ -173,13 +185,10 @@ recordBtn.addEventListener('click', async () => {
     }
 });
 
-// IMMEDIATE STOP LISTENING
 stopBtn.addEventListener('click', async () => {
     try {
-        // Send stop signal to backend
         await fetch(`${API_URL}/stop-listening`, { method: 'POST' });
         
-        // Abort the fetch request immediately
         if (listeningAbortController) {
             listeningAbortController.abort();
         }
@@ -217,9 +226,9 @@ saveVoiceBtn.addEventListener('click', async () => {
     }
 });
 
-// ===== TEXT TO VOICE (IMMEDIATE STOP) =====
+// ===== TEXT TO VOICE (SMART DETECTION) =====
 speakBtn.addEventListener('click', async () => {
-    const text = textInput.value.trim().substring(0, 150);
+    const text = textInput.value.trim();
     
     if (!text) {
         showNotification('Type something!', 'error');
@@ -234,48 +243,46 @@ speakBtn.addEventListener('click', async () => {
     isProcessing = true;
     speakBtn.disabled = true;
     stopSpeakBtn.disabled = false;
-    textOutput.innerHTML = '<p style="color:#999;">⚡ Generating...</p>';
+    textOutput.innerHTML = '<p style="color:#999;">🎙️ Speaking...</p>';
     copyTextBtn.disabled = true;
     saveTextBtn.disabled = true;
     
     try {
-        const response = await fetch(`${API_URL}/text-to-speech-stream`, {
+        const response = await fetch(`${API_URL}/text-to-voice-and-generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text: text })
         });
         
-        let fullResponse = '';
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
+        const data = await response.json();
         
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split('\n');
-            
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    try {
-                        const data = JSON.parse(line.slice(6));
-                        
-                        if (data.text) {
-                            fullResponse += data.text;
-                            textOutput.innerHTML = `<strong>Response:</strong><br><span style="color:#11998e;">${fullResponse}</span>`;
-                        }
-                        
-                        if (data.complete) {
-                            currentTextData = { input: text, output: fullResponse };
-                            addToHistory('text', text, fullResponse);
-                            copyTextBtn.disabled = false;
-                            saveTextBtn.disabled = false;
-                            showNotification('✅ Done!');
-                        }
-                    } catch (e) {}
-                }
+        if (data.success) {
+            if (data.is_question) {
+                // It's a question - show Q&A
+                textOutput.innerHTML = `
+                    <strong>❓ Your Question:</strong><br>
+                    <span style="color:#667eea;">${data.user_input}</span>
+                    <br><br>
+                    <strong>🤖 AI Answer:</strong><br>
+                    <span style="color:#11998e;">${data.ai_response}</span>
+                `;
+                showNotification('✅ Question answered!');
+            } else {
+                // It's just text - only show what was spoken
+                textOutput.innerHTML = `
+                    <strong>🎙️ Text Spoken:</strong><br>
+                    <span style="color:#667eea;">${data.user_input}</span>
+                `;
+                showNotification('✅ Text spoken!');
             }
+            
+            currentTextData = { input: text, output: data.ai_response || '' };
+            addToHistory('text', text, data.ai_response || '');
+            copyTextBtn.disabled = false;
+            saveTextBtn.disabled = false;
+        } else {
+            textOutput.innerHTML = `<p style="color:#eb3349;">❌ ${data.error}</p>`;
+            showNotification('Error', 'error');
         }
     } catch (error) {
         textOutput.innerHTML = `<p style="color:#eb3349;">❌ ${error.message}</p>`;
@@ -286,10 +293,8 @@ speakBtn.addEventListener('click', async () => {
     }
 });
 
-// IMMEDIATE STOP SPEAKING
 stopSpeakBtn.addEventListener('click', async () => {
     try {
-        // Send stop signal to backend IMMEDIATELY
         await fetch(`${API_URL}/stop-speech`, { method: 'POST' });
         
         speakBtn.disabled = false;
