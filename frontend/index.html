@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Assistant - Convert Voice to Text & Text to Voice</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎙️ Voice Assistant</h1>
+            <p>Convert Voice to Text & Text to Voice</p>
+        </header>
+
+        <div class="content">
+            <!-- Voice to Text Section -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>🎤 Voice to Text</h2>
+                </div>
+                <div class="card-body">
+                    <button id="recordBtn" class="btn btn-primary">
+                        <span class="btn-icon">🎤</span>
+                        Start Listening
+                    </button>
+                    <button id="stopBtn" class="btn btn-danger" disabled>
+                        <span class="btn-icon">⏹️</span>
+                        Stop
+                    </button>
+                    <div id="voiceOutput" class="output-box">
+                        <p class="placeholder">Your voice will appear here...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Text to Voice Section -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>🔊 Text to Voice</h2>
+                </div>
+                <div class="card-body">
+                    <textarea id="textInput" class="textarea" placeholder="Type text here..."></textarea>
+                    <button id="speakBtn" class="btn btn-success">
+                        <span class="btn-icon">🔊</span>
+                        Speak
+                    </button>
+                    <button id="stopSpeakBtn" class="btn btn-danger" disabled>
+                        <span class="btn-icon">⏹️</span>
+                        Stop Speaking
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <p>© 2026 Voice and Text Assistant</p>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
