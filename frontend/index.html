@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Intelligence System</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Animated Background -->
+    <div class="background-animation"></div>
+    
+    <div class="container">
+        <!-- Header with Animation -->
+        <header class="header animated-header">
+            <div class="header-content">
+                <div class="logo-container">
+                    <div class="animated-logo">🎙️</div>
+                </div>
+                <h1 class="title-glow">Voice Intelligence System</h1>
+                <p class="subtitle">Advanced Speech Recognition & Generation Technology</p>
+            </div>
+            <div class="header-controls">
+                <button id="themeToggle" class="btn-theme">
+                    <span class="theme-icon">🌙</span>
+                </button>
+                <button id="exportBtn" class="btn-export">
+                    <span class="icon">📥</span> Export All
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Voice to Text Section -->
+            <div class="section voice-section animated-card">
+                <div class="section-header">
+                    <div class="header-icon">🎤</div>
+                    <h2>Voice to Text</h2>
+                    <p>Transform your voice into intelligent text</p>
+                </div>
+                
+                <div class="section-body">
+                    <div class="button-group animated-buttons">
+                        <button id="recordBtn" class="btn btn-primary pulse">
+                            <span class="icon">🎤</span>
+                            <span>Start Listening</span>
+                        </button>
+                        <button id="stopBtn" class="btn btn-danger" disabled>
+                            <span class="icon">⏹️</span>
+                            <span>Stop</span>
+                        </button>
+                    </div>
+
+                    <div class="output-section">
+                        <div class="output-label">Your Speech</div>
+                        <div id="voiceOutput" class="output-box glow-box">
+                            <p class="placeholder">🎤 Your voice will appear here...</p>
+                        </div>
+                    </div>
+
+                    <div class="output-section">
+                        <div class="output-label">AI Understanding</div>
+                        <div id="aiVoiceOutput" class="output-box ai-glow-box">
+                            <p class="placeholder">✨ AI analysis will appear here...</p>
+                        </div>
+                    </div>
+
+                    <div class="action-buttons">
+                        <button id="copyVoiceBtn" class="btn btn-secondary" disabled>
+                            <span class="icon">📋</span> Copy
+                        </button>
+                        <button id="saveVoiceBtn" class="btn btn-save" disabled>
+                            <span class="icon">💾</span> Save Response
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Text to Voice Section -->
+            <div class="section text-section animated-card">
+                <div class="section-header">
+                    <div class="header-icon">🔊</div>
+                    <h2>Text to Voice</h2>
+                    <p>Generate and listen to intelligent audio</p>
+                </div>
+
+                <div class="section-body">
+                    <div class="input-group">
+                        <label class="input-label">Your Input</label>
+                        <textarea id="textInput" class="textarea large-textarea" 
+                                  placeholder="Type your message here...&#10;&#10;Examples:&#10;• Tell me a joke&#10;• What is artificial intelligence?&#10;• How does machine learning work?"></textarea>
+                    </div>
+
+                    <div class="button-group animated-buttons">
+                        <button id="speakBtn" class="btn btn-success pulse">
+                            <span class="icon">🔊</span>
+                            <span>Generate & Speak</span>
+                        </button>
+                        <button id="stopSpeakBtn" class="btn btn-danger" disabled>
+                            <span class="icon">⏹️</span>
+                            <span>Stop</span>
+                        </button>
+                    </div>
+
+                    <div class="output-section">
+                        <div class="output-label">AI Generated Response</div>
+                        <div id="textOutput" class="output-box ai-glow-box">
+                            <p class="placeholder">✨ AI response will appear here...</p>
+                        </div>
+                    </div>
+
+                    <div class="action-buttons">
+                        <button id="copyTextBtn" class="btn btn-secondary" disabled>
+                            <span class="icon">📋</span> Copy
+                        </button>
+                        <button id="saveTextBtn" class="btn btn-save" disabled>
+                            <span class="icon">💾</span> Save Response
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Conversation History -->
+        <div class="section history-section animated-card">
+            <div class="section-header">
+                <div class="header-icon">📋</div>
+                <h2>Conversation History</h2>
+                <button id="clearHistoryBtn" class="btn btn-small btn-danger">Clear All</button>
+            </div>
+            <div id="historyContainer" class="history-container">
+                <p class="placeholder">No conversations yet...</p>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>© 2026 Voice Intelligence System</p>
+            <p class="tech-stack">Advanced Speech Processing Technology</p>
+        </footer>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="notification" class="notification"></div>
+
+    <script src="script.js"></script>
+</body>
+</html>
