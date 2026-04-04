@@ -1,7 +1,26 @@
-__pycache__/
-*.pyc
-.env
-node_modules/
+# Virtual Environment
 venv/
-*.mp3
-*.wav
+env/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+saved_responses/
+*.log
+.env
