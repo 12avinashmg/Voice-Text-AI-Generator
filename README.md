@@ -1,6 +1,6 @@
 # 🎤 AI Voice & Text Assistant (Speech-to-Text + Text-to-Speech with Local LLM)
 
-> A real-time AI assistant that converts speech to text and generates AI responses in text, and converts text input along with AI responses into speech using a local LLM (Ollama - neural-chat).
+> A real-time AI assistant that converts speech to text and generates AI responses in text, and converts text input along with AI responses into speech using a local LLM (Ollama - Phi).
 
 ---
 
@@ -40,7 +40,7 @@
 
 * Real-time speech recognition
 * Dual STT support (Google + Sphinx fallback)
-* Local AI processing using Ollama (neural-chat model)
+* Local AI processing using Ollama (Phi model)
 * Offline-capable architecture (no cloud LLM)
 * Text-to-speech with adjustable voice settings
 * Clean and responsive UI
@@ -51,7 +51,7 @@
 
 * Python (Flask)
 * SpeechRecognition (Google + Sphinx)
-* Ollama (neural-chat Model - Local LLM)
+* Ollama (Phi Model - Local LLM)
 * pyttsx3 (Text-to-Speech)
 * HTML, CSS, JavaScript
 
@@ -68,7 +68,7 @@ pip install -r requirements.txt
 ### 2. Run Ollama Model
 
 ```bash
-ollama run neural-chat
+ollama run phi
 ```
 
 ### 3. Start Backend
